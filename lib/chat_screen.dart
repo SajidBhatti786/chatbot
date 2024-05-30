@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:jumping_dot/jumping_dot.dart';
+import 'package:flutter/services.dart';
 
 void main() {
   runApp(ChatApp());
@@ -88,7 +90,7 @@ class _ChatScreenState extends State<ChatScreen> {
       } else if (text != null && text.isNotEmpty) {
         _messages.add(Message(isUser: true, message: text, date: DateTime.now(), waiting: false));
          _chatHistory.add(ChatMessage(role: "user", message: text ?? ""));
-        _messages.add(Message(isUser: false, message: "loading", date: DateTime.now(), waiting: true));
+        _messages.add(Message(isUser: false, message: "loading...", date: DateTime.now(), waiting: true));
       }
       _scrollToBottom();
     });
@@ -133,10 +135,6 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollToBottom();
   });
     });
-    
-    // _userInput.clear();
-    // _selectedImage = null;
-    // _imageSelected = false;
   }
 
   void _scrollToBottom() {
@@ -174,8 +172,8 @@ class _ChatScreenState extends State<ChatScreen> {
               itemBuilder: (context, index) {
                 final message = _messages[index];
                 return message.image != null
-                    ? ImageMessage(message: message)
-                    : TextMessage(message: message);
+                    ? ImageMessage(message: message, context: context)
+                    : TextMessage(message: message, context: context);
               },
             ),
           ),
@@ -253,12 +251,105 @@ class Message {
   bool waiting;
 
   Message({required this.isUser, this.message, this.image, required this.date, this.waiting = false});
+  
+  get key => null;
 }
 
 class TextMessage extends StatelessWidget {
   final Message message;
+  final BuildContext context;
 
-  const TextMessage({Key? key, required this.message}) : super(key: key);
+  const TextMessage({Key? key, required this.message, required this.context}) : super(key: key);
+
+  List<InlineSpan> _formatMessage(String message) {
+    final RegExp codeBlockRegex = RegExp(r'```(.*?)```', dotAll: true);
+    final List<InlineSpan> spans = [];
+
+    int lastMatchEnd = 0;
+    final matches = codeBlockRegex.allMatches(message);
+
+    for (final match in matches) {
+      if (match.start > lastMatchEnd) {
+        spans.add(
+          WidgetSpan(
+            child: MarkdownBody(
+              data: message.substring(lastMatchEnd, match.start),
+            ),
+          ),
+        );
+      }
+      spans.add(
+        WidgetSpan(
+          child: Container(
+            color: Colors.black54,
+            padding: EdgeInsets.all(4),
+           
+           
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    match.group(1)?.substring(0, match.group(1)?.indexOf('\n') ?? 0) ?? "",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.copy),
+                  color: Colors.white,
+                  onPressed: () => _copyToClipboard(
+                    match.group(1)?.substring((match.group(1)?.indexOf('\n') ?? -1) + 1) ?? "",
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      spans.add(
+        WidgetSpan(
+          child: Container(
+            color: Colors.black,
+            padding: EdgeInsets.all(4),
+            
+            child: Text(
+              match.group(1)?.substring((match.group(1)?.indexOf('\n') ?? -1) + 1) ?? "",
+              style: TextStyle(
+                fontFamily: 'monospace',
+                color: Colors.white,
+                decoration: TextDecoration.none,
+              ),
+            ),
+          ),
+        ),
+      );
+      lastMatchEnd = match.end;
+    }
+
+    if (lastMatchEnd < message.length) {
+      spans.add(
+        WidgetSpan(
+          child: MarkdownBody(
+            data: message.substring(lastMatchEnd),
+          ),
+        ),
+      );
+    }
+
+    return spans;
+  }
+
+  void _copyToClipboard(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Code copied to clipboard'),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -270,7 +361,7 @@ class TextMessage extends StatelessWidget {
         right: message.isUser ? 10 : 100,
       ),
       decoration: BoxDecoration(
-        color: message.isUser ? Colors.blue : Colors.black26,
+        color: message.isUser ? Colors.blue : Colors.black45,
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(10),
           bottomLeft: message.isUser ? Radius.circular(10) : Radius.zero,
@@ -281,36 +372,129 @@ class TextMessage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: message.waiting
-          ? [
-              Container(
-                child: JumpingDots(
-                  innerPadding: 5,
-                  radius: 5,
-                  color: Colors.red,
-                  verticalOffset: 5,
-                  animationDuration: const Duration(milliseconds: 100),
+            ? [
+                Container(
+                  child: JumpingDots(
+                    innerPadding: 5,
+                    radius: 5,
+                    color: Colors.red,
+                    verticalOffset: 5,
+                    animationDuration: const Duration(milliseconds: 100),
+                  ),
                 ),
-              ),
-            ]
-          : [
-              SelectableText(
-                message.message!,
-                style: TextStyle(fontSize: 16, color: message.isUser ? Colors.white : Colors.black),
-              ),
-              Text(
-                '${message.date.hour}:${message.date.minute}',
-                style: TextStyle(fontSize: 10, color: message.isUser ? Colors.white70 : Colors.black54),
-              ),
-            ],
+              ]
+            : [
+                GestureDetector(
+                  onTap: () => {},
+                  child: SelectableText.rich(
+                     TextSpan(
+                      style: TextStyle(fontSize: 16, color: message.isUser ? Colors.white : Colors.black),
+                      children: _formatMessage(message.message!),
+                    ),
+                  ),
+                ),
+                Text(
+                  '${message.date.hour}:${message.date.minute}',
+                  style: TextStyle(fontSize: 10, color: message.isUser ? Colors.white70 : Colors.black54),
+                ),
+              ],
       ),
     );
   }
 }
 
+
 class ImageMessage extends StatelessWidget {
   final Message message;
+  final BuildContext context;
 
-  const ImageMessage({Key? key, required this.message}) : super(key: key);
+  const ImageMessage({Key? key, required this.message, required this.context}) : super(key: key);
+
+  List<InlineSpan> _formatMessage(String message) {
+    final RegExp codeBlockRegex = RegExp(r'```(.*?)```', dotAll: true);
+    final List<InlineSpan> spans = [];
+
+    int lastMatchEnd = 0;
+    final matches = codeBlockRegex.allMatches(message);
+
+    for (final match in matches) {
+      if (match.start > lastMatchEnd) {
+        spans.add(
+          WidgetSpan(
+            child: MarkdownBody(
+              data: message.substring(lastMatchEnd, match.start),
+            ),
+          ),
+        );
+      }
+      spans.add(
+        WidgetSpan(
+          child: Container(
+            padding: EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    match.group(1)?.substring(0, match.group(1)?.indexOf('\n') ?? 0) ?? "",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.copy),
+                  color: Colors.white,
+                  onPressed: () => _copyToClipboard(
+                    match.group(1)?.substring((match.group(1)?.indexOf('\n') ?? -1) + 1) ?? "",
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      spans.add(
+        WidgetSpan(
+          child: Container(
+            color: Colors.black,
+            child: Text(
+              match.group(1)?.substring((match.group(1)?.indexOf('\n') ?? -1) + 1) ?? "",
+              style: TextStyle(
+                fontFamily: 'monospace',
+                color: Colors.white,
+                decoration: TextDecoration.none,
+              ),
+            ),
+          ),
+        ),
+      );
+      lastMatchEnd = match.end;
+    }
+
+    if (lastMatchEnd < message.length) {
+      spans.add(
+        WidgetSpan(
+          child: MarkdownBody(
+            data: message.substring(lastMatchEnd),
+          ),
+        ),
+      );
+    }
+
+    return spans;
+  }
+
+  void _copyToClipboard(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Code copied to clipboard'),
+      ),
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -355,3 +539,6 @@ class ImageMessage extends StatelessWidget {
     );
   }
 }
+
+
+
